@@ -31,3 +31,9 @@
     </div>
 </div>
 {% endblock %}
+
+{% block scripts %}
+<script>
+    $(window).on("load", function(){$("#exampleModal").modal({}).draggable();})
+</script>
+{% endblock %}
