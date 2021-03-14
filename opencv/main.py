@@ -1,4 +1,3 @@
-# import the necessary packages
 from pyimagesearch.motion_detection.singlemotiondetector import SingleMotionDetector
 from imutils.video import VideoStream
 from flask import Response
@@ -11,118 +10,114 @@ import imutils
 import time
 import cv2
 
-# initialize the output frame and a lock used to ensure thread-safe
-# exchanges of the output frames (useful when multiple browsers/tabs
-# are viewing the stream)
+# inicializa o frame que vai ser enviado ao cliente e utiliza do lock
+# para garantir o funcionamento do frame impedindo a leitura dele enquanto
+# é atualizado
 outputFrame = None
 lock = threading.Lock()
-# initialize a flask object
-app = Flask(__name__)
-# initialize the video stream and allow the camera sensor to
-# warmup
-# vs = VideoStream(usePiCamera=1).start()
-vs = VideoStream(src="rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov").start()
-time.sleep(2.0)
 
+# inicializa o objeto do framework flask
+app = Flask(__name__)
+
+# inicializa a stream do vídeo a partir do link rtsp
+
+vs = VideoStream(src="rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov").start()
 
 @app.route("/")
 def index():
-    # return the rendered template
+    # retorna o template renderizado
     return render_template("index.html")
 
 
 def detect_motion(frameCount):
-    # grab global references to the video stream, output frame, and
-    # lock variables
+    # traz variáveis globais para dentro da função
     global vs, outputFrame, lock
-    # initialize the motion detector and the total number of frames
-    # read thus far
+    # inicializa o detector de movimento e o número total
+    # de frames lidos até o momento
     md = SingleMotionDetector(accumWeight=0.1)
     total = 0
-    # loop over frames from the video stream
+    # laço que acessa os frames vindos da stream
     while True:
-        # read the next frame from the video stream, resize it,
-        # convert the frame to grayscale, and blur it
+        # acessa o próximo frame da stream, redimensiona a imagem,
+        # converte para uma escala de cinza e aplica um filtro para
+        # redução de ruído
         frame = vs.read()
         frame = imutils.resize(frame, width=400)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (7, 7), 0)
-        # grab the current timestamp and draw it on the frame
+        # Aplica a data atual no frame
         timestamp = datetime.datetime.now()
         cv2.putText(frame, timestamp.strftime(
             "%A %d %B %Y %I:%M:%S%p"), (10, frame.shape[0] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
-        # if the total number of frames has reached a sufficient
-        # number to construct a reasonable background model, then
-        # continue to process the frame
+
+        # garante que o número mínimo de frames foram lidos para a construção
+        # do modelo de background
         if total > frameCount:
-            # detect motion in the image
+            # Detecta se houve movimento no frame
             motion = md.detect(gray)
-            # check to see if motion was found in the frame
+            # checagem se para confirmar se houve movimento no frame
+            # e se houve realizar as ações
             if motion is not None:
-                # unpack the tuple and draw the box surrounding the
-                # "motion area" on the output frame
+                # Desenha uma borda em volta da área de movimento no frame
                 (thresh, (minX, minY, maxX, maxY)) = motion
                 cv2.rectangle(frame, (minX, minY), (maxX, maxY),
                               (0, 0, 255), 2)
-        # update the background model and increment the total number
-        # of frames read thus far
+
+        # atualiza o modelo de background e incrementa o número de frames
+        # lidos até o momento
         md.update(gray)
         total += 1
-        # acquire the lock, set the output frame, and release the
-        # lock
+
+        # utilizando do lock, define o frame que vai ser enviado ao cliente
         with lock:
             outputFrame = frame.copy()
 
 
 def generate():
-    # grab global references to the output frame and lock variables
+    # traz variáveis globais para a função
     global outputFrame, lock
-    # loop over frames from the output stream
+    # laço sobre os frames do outputframe
     while True:
-        # wait until the lock is acquired
+        # utilizando-se do lock
         with lock:
-            # check if the output frame is available, otherwise skip
-            # the iteration of the loop
+            # checa se o frame está disponível
             if outputFrame is None:
                 continue
-            # encode the frame in JPEG format
+            # codifica o frame em uma imagem jpeg
             (flag, encodedImage) = cv2.imencode(".jpg", outputFrame)
-            # ensure the frame was successfully encoded
+            # garante que a imagem foi codificada com sucessa
             if not flag:
                 continue
-        # yield the output frame in the byte format
+        # retorna o outputframe em formato de byte
         yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' +
                bytearray(encodedImage) + b'\r\n')
 
 
 @app.route("/video_feed")
 def video_feed():
-    # return the response generated along with the specific media
-    # type (mime type)
+    # returna a reposta da função generate com um tipo de mídia específico
     return Response(generate(),
                     mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
-# check to see if this is the main thread of execution
 if __name__ == '__main__':
-    # construct the argument parser and parse command line arguments
+    # Estrutura de parâmetros necessários para inicialização
     ap = argparse.ArgumentParser()
-    ap.add_argument("-i", "--ip", type=str, required=True,
+    ap.add_argument("-i", "--ip", type=str, default='0.0.0.0',
                     help="ip address of the device")
-    ap.add_argument("-o", "--port", type=int, required=True,
+    ap.add_argument("-o", "--port", type=int, default=8000,
                     help="ephemeral port number of the server (1024 to 65535)")
     ap.add_argument("-f", "--frame-count", type=int, default=32,
                     help="# of frames used to construct the background model")
     args = vars(ap.parse_args())
-    # start a thread that will perform motion detection
+    # inicializa uma thread responsável pela detecção de movimento
     t = threading.Thread(target=detect_motion, args=(
         args["frame_count"],))
     t.daemon = True
     t.start()
-    # start the flask app
+    # Inicializa o aplicativo Flask
     app.run(host=args["ip"], port=args["port"], debug=True,
             threaded=True, use_reloader=False)
 
-# release the video stream pointer
 vs.stop()
