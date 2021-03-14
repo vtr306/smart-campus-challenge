@@ -10,6 +10,11 @@ five_seconds = 5*fps
 
 count = 1
 
+try:
+    os.mkdir('images')
+except FileExistsError:
+    pass
+
 while video.isOpened():
     ret, frame = video.read()
     if not ret:
